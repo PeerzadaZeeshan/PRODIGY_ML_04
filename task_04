@@ -1,0 +1,114 @@
+import sys
+import os
+
+# --- CODE ---
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.utils import to_categorical
+
+# Configuration
+DATA_DIR = 'leapGestRecog'  # The main folder
+IMG_SIZE = 64               # Resize images to 64x64
+CATEGORIES = ["01_palm", "02_l", "03_fist", "04_fist_moved", "05_thumb", 
+              "06_index", "07_ok", "08_palm_moved", "09_c", "10_down"]
+
+print(f"Loading images from '{DATA_DIR}'...")
+
+data = []
+labels = []
+
+# Load Images
+# We iterate through the '00', '01', etc. subfolders
+if not os.path.exists(DATA_DIR):
+    print(f"ERROR: The folder '{DATA_DIR}' was not found. Please unzip the dataset here.")
+    sys.exit()
+
+count = 0
+for folder in os.listdir(DATA_DIR):
+    path = os.path.join(DATA_DIR, folder)
+    if not os.path.isdir(path):
+        continue
+        
+    for gesture in CATEGORIES:
+        gesture_path = os.path.join(path, gesture)
+        if not os.path.exists(gesture_path):
+            continue
+            
+        class_num = CATEGORIES.index(gesture)
+        
+        for img in os.listdir(gesture_path):
+            try:
+                img_array = cv2.imread(os.path.join(gesture_path, img), cv2.IMREAD_GRAYSCALE)
+                resized_array = cv2.resize(img_array, (IMG_SIZE, IMG_SIZE))
+                data.append(resized_array)
+                labels.append(class_num)
+                count += 1
+            except Exception as e:
+                pass
+
+print(f"Loaded {count} images.")
+
+# Preprocessing
+X = np.array(data).reshape(-1, IMG_SIZE, IMG_SIZE, 1) # Reshape for CNN (grayscale = 1 channel)
+X = X / 255.0  # Normalize pixel values (0-1)
+y = to_categorical(np.array(labels)) # One-hot encode labels
+
+# Split Data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Build CNN Model
+print("Building Model...")
+model = Sequential()
+
+# Layer 1: Convolution
+model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(IMG_SIZE, IMG_SIZE, 1)))
+model.add(MaxPooling2D((2, 2)))
+
+# Layer 2: Convolution
+model.add(Conv2D(64, (3, 3), activation='relu'))
+model.add(MaxPooling2D((2, 2)))
+
+# Layer 3: Flatten & Dense
+model.add(Flatten())
+model.add(Dense(128, activation='relu'))
+model.add(Dropout(0.5)) # Prevents overfitting
+model.add(Dense(10, activation='softmax')) # Output layer (10 gestures)
+
+# Compile
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train
+print("Training Model...")
+history = model.fit(X_train, y_train, epochs=5, validation_data=(X_test, y_test), batch_size=32)
+
+# Evaluate
+test_loss, test_acc = model.evaluate(X_test, y_test)
+print(f"\n--- Model Accuracy: {test_acc*100:.2f}% ---")
+
+# Visualization
+# 1. Accuracy Graph
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(history.history['accuracy'], label='Training Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Model Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+
+# 2. Random Predictions
+plt.subplot(1, 2, 2)
+indices = np.random.randint(0, len(X_test), 9)
+for i, idx in enumerate(indices):
+    plt.subplot(3, 3, i + 1)
+    plt.imshow(X_test[idx].reshape(IMG_SIZE, IMG_SIZE), cmap='gray')
+    pred_label = CATEGORIES[np.argmax(model.predict(X_test[idx].reshape(1, IMG_SIZE, IMG_SIZE, 1)))]
+    plt.title(pred_label, fontsize=8)
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
